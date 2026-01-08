@@ -73,24 +73,44 @@ final_chain = RunnablePassthrough.assign(messages_summarized=summarize_messages)
         if x['messages_summarized'].get("summary") else "无摘要",
 ) | chain_with_message_history
 
-# result1 = final_chain.invoke({'input':'你好，我是周辉发',"config":{"configurable":{"session_id": "user123"}}},config={"configurable":{"session_id": "user123"}})
-# print(result1)
-#
-# result2 = final_chain.invoke({'input':'我的名字是什么',"config":{"configurable":{"session_id": "user123"}}},config={"configurable":{"session_id": "user123"}})
-# print(result2)
-# #
-# result3 = final_chain.invoke({'input':'历史上和我同名不同姓氏的人有哪些？',"config":{"configurable":{"session_id": "user123"}}},config={"configurable":{"session_id": "user123"}})
-# print(result3)
+def get_last_user_after_assistant(history):
+    # 反向遍历找到最后一个assistant的位置，并返回后面的所有user消息
+    if not history:
+        return None
+    if history[-1]['role'] == 'assistant':
+        return None
+    last_assistant_idx = -1
+    for i in range(len(history) - 1, -1, -1):
+        if history[i]['role'] == 'assistant':
+            last_assistant_idx = i
+            break
+    # 如果没有找到assistant
+    if last_assistant_idx == -1:
+        return history
+    else:
+        # 从assistant位置向后找第一个user
+        return history[last_assistant_idx+1:]
 
 # web页面中的核心函数
-def add_message(chat_history, user_message):
-    if user_message:
-        chat_history.append({'role': 'user', 'content': user_message})
-    return chat_history, ''
+def add_message(chat_history, user_messages):
+    # 将用户输入的消息添加到聊天记录中
+    for m in user_messages['files']:
+        print(m)
+        chat_history.append({'role': 'user', 'content': {'path': m}})
+    # 处理文本消息
+    if user_messages['text'] is not None:
+        chat_history.append({'role': 'user', 'content': user_messages['text']})
+    # 返回更新后的历史和重置的输入框
+    return chat_history, gr.MultimodalTextbox(value=None, interactive=False)
+
+def submit_messages(history):
+    # 提交用户输入的消息，生成机器人回复
+    user_messages = get_last_user_after_assistant(history)
+    print(user_messages)
 
 def execute_chain(chat_history):
     input = chat_history[-1]
-    result = final_chain.invoke({'input': input, "config": {"configurable": {"session_id": "user123"}}},
+    result = final_chain.invoke({'input': input['content'], "config": {"configurable": {"session_id": "user123"}}},
                                  config={"configurable": {"session_id": "user123"}})
     chat_history.append({'role': 'assistant', 'content': result.content})
     return chat_history
@@ -98,16 +118,25 @@ def execute_chain(chat_history):
 with gr.Blocks(title='多模态聊天机器人', theme=gr.themes.Soft()) as block:
     # 聊天历史记录的组件
     chatbot = gr.Chatbot(height=500, label='聊天机器人')
-    with gr.Row():
-        # 文字输入的区域
-        with gr.Column(scale=4):
-            user_input = gr.Textbox(placeholder='请给机器人发送消息...', label='文字输入', max_lines=5)
-            submit_btn = gr.Button('发送', variant='primary')
-        # 语音输入的区域
-        with gr.Column(scale=1):
-            audio_input = gr.Audio(sources=['microphone'], label='语音输入', type='filepath', format='wav')
-    chat_msg = user_input.submit(add_message, [chatbot, user_input],[chatbot, user_input])
-    chat_msg.then(execute_chain, chatbot, chatbot)
+    # 创建多模态输入框
+    chat_input = gr.MultimodalTextbox(
+        interactive=True, # 可交互
+        file_types=['image', '.wav', '.mp4'],
+        file_count='multiple',
+        placeholder="请输入信息或者上传文件...",
+        show_label=False,
+        sources=['microphone', 'upload']
+    )
+    chat_input.submit(
+        add_message,
+        [chatbot, chat_input],
+        [chatbot, chat_input],
+    ).then(
+        submit_messages,
+        [chatbot],
+        [chatbot],
+    )
+
 
 if __name__ == '__main__':
     block.launch()

@@ -2,6 +2,9 @@ from langchain_community.chat_message_histories import SQLChatMessageHistory
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 from langchain_core.runnables import RunnableWithMessageHistory, RunnablePassthrough
 import gradio as gr
+from zhipuai import ZhipuAI
+
+from env_utils import ZHIPU_API_KEY
 from util.my_llm import llm_gpt
 
 # 1. 提示词模版
@@ -73,14 +76,6 @@ final_chain = RunnablePassthrough.assign(messages_summarized=summarize_messages)
         if x['messages_summarized'].get("summary") else "无摘要",
 ) | chain_with_message_history
 
-# result1 = final_chain.invoke({'input':'你好，我是周辉发',"config":{"configurable":{"session_id": "user123"}}},config={"configurable":{"session_id": "user123"}})
-# print(result1)
-#
-# result2 = final_chain.invoke({'input':'我的名字是什么',"config":{"configurable":{"session_id": "user123"}}},config={"configurable":{"session_id": "user123"}})
-# print(result2)
-# #
-# result3 = final_chain.invoke({'input':'历史上和我同名不同姓氏的人有哪些？',"config":{"configurable":{"session_id": "user123"}}},config={"configurable":{"session_id": "user123"}})
-# print(result3)
 
 # web页面中的核心函数
 def add_message(chat_history, user_message):
@@ -95,6 +90,22 @@ def execute_chain(chat_history):
     chat_history.append({'role': 'assistant', 'content': result.content})
     return chat_history
 
+def read_audio(audio_message):
+    # 读取音频文件
+    print(audio_message)
+    if audio_message:
+        client = ZhipuAI(api_key=ZHIPU_API_KEY)
+        with open(audio_message, 'rb') as audio_file:
+            resp = client.audio.transcriptions.create(
+                model='glm-asr',
+                file=audio_file,
+                stream=False
+            )
+            text = resp.model_extra['text']
+            print(text)
+            return text
+    return ''
+
 with gr.Blocks(title='多模态聊天机器人', theme=gr.themes.Soft()) as block:
     # 聊天历史记录的组件
     chatbot = gr.Chatbot(height=500, label='聊天机器人')
@@ -106,8 +117,15 @@ with gr.Blocks(title='多模态聊天机器人', theme=gr.themes.Soft()) as bloc
         # 语音输入的区域
         with gr.Column(scale=1):
             audio_input = gr.Audio(sources=['microphone'], label='语音输入', type='filepath', format='wav')
+    # 文本框提交的事件
     chat_msg = user_input.submit(add_message, [chatbot, user_input],[chatbot, user_input])
     chat_msg.then(execute_chain, chatbot, chatbot)
+
+    # 语音输入框的事件
+    audio_input.change(read_audio, [audio_input], [user_input])
+
+    # 提交按钮点击事件
+    submit_btn.click(add_message, [chatbot, user_input], [chatbot, user_input]).then(execute_chain, chatbot, chatbot)
 
 if __name__ == '__main__':
     block.launch()
